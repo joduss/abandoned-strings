@@ -17,15 +17,13 @@ import Foundation
 
 let dispatchGroup = DispatchGroup.init()
 let serialWriterQueue = DispatchQueue.init(label: "writer")
-let standardOut: OutputStream = OutputStream(streamType: .stdOut, stringEncoding: .utf8)
-let standardError: OutputStream = OutputStream(streamType: .stdErr, stringEncoding: .utf8)
 
 func findFilesIn(_ directories: [String], withExtensions extensions: [String]) -> [String] {
     let fileManager = FileManager.default
     var files = [String]()
     for directory in directories {
         guard let enumerator: FileManager.DirectoryEnumerator = fileManager.enumerator(atPath: directory) else {
-            standardError.write("Failed to create enumerator for directory: \(directory)")
+            print("Failed to create enumerator for directory: \(directory)")
             return []
         }
         while let path = enumerator.nextObject() as? String {
@@ -44,16 +42,13 @@ func contentsOfFile(_ filePath: String) -> String {
         return try String(contentsOfFile: filePath)
     }
     catch {
-        standardError.forceWriteToStdErr("Cannot find file at path: \(filePath)")
+        print("cannot read file!!!")
         exit(1)
     }
 }
 
-func concatenateAllSourceCodeIn(_ directories: [String], withStoryboard: Bool) -> String {
-    var extensions = ["h", "m", "swift", "jsbundle"]
-    if withStoryboard {
-        extensions.append("storyboard")
-    }
+func concatenateAllSourceCodeIn(_ directories: [String]) -> String {
+    let extensions = ["h", "m", "swift", "jsbundle", "storyboard"]
     let sourceFiles = findFilesIn(directories, withExtensions: extensions)
     return sourceFiles.reduce("") { (accumulator, sourceFile) -> String in
         return accumulator + contentsOfFile(sourceFile)
@@ -85,7 +80,7 @@ func extractStringIdentifierFromTrimmedLine(_ line: String) -> String {
 func findStringIdentifiersIn(_ stringsFile: String, abandonedBySourceCode sourceCode: String) -> [String] {
     return extractStringIdentifiersFrom(stringsFile).filter { identifier in
         let quotedIdentifier = "\"\(identifier)\""
-        let quotedIdentifierForStoryboard = "\"@\(identifier)\""
+        let quotedIdentifierForStoryboard = "id=\"\(identifier.split(separator: ".")[0])\""
         let signalQuotedIdentifierForJs = "'\(identifier)'"
         let isAbandoned = (sourceCode.contains(quotedIdentifier) == false && sourceCode.contains(quotedIdentifierForStoryboard) == false &&
             sourceCode.contains(signalQuotedIdentifierForJs) == false)
@@ -106,9 +101,9 @@ func stringsFile(_ stringsFile: String, without identifiers: [String]) -> String
 
 typealias StringsFileToAbandonedIdentifiersMap = [String: [String]]
 
-func findAbandonedIdentifiersIn(_ rootDirectories: [String], withStoryboard: Bool) -> StringsFileToAbandonedIdentifiersMap {
+func findAbandonedIdentifiersIn(_ rootDirectories: [String]) -> StringsFileToAbandonedIdentifiersMap {
     var map = StringsFileToAbandonedIdentifiersMap()
-    let sourceCode = concatenateAllSourceCodeIn(rootDirectories, withStoryboard: withStoryboard)
+    let sourceCode = concatenateAllSourceCodeIn(rootDirectories)
     let stringsFiles = findFilesIn(rootDirectories, withExtensions: ["strings"])
     for stringsFile in stringsFiles {
         dispatchGroup.enter()
@@ -120,7 +115,7 @@ func findAbandonedIdentifiersIn(_ rootDirectories: [String], withStoryboard: Boo
                     dispatchGroup.leave()
                 }
             } else {
-                standardOut.write("\(stringsFile) has no abandonedIdentifiers")
+                NSLog("\(stringsFile) has no abandonedIdentifiers")
                 dispatchGroup.leave()
             }
         }
@@ -128,6 +123,7 @@ func findAbandonedIdentifiersIn(_ rootDirectories: [String], withStoryboard: Boo
     dispatchGroup.wait()
     return map
 }
+
 
 // MARK: - Engine
 
@@ -156,37 +152,36 @@ func isOptionaParameterForWritingAvailable() -> Bool {
 
 func displayAbandonedIdentifiersInMap(_ map: StringsFileToAbandonedIdentifiersMap) {
     for file in map.keys.sorted() {
-        standardOut.write("\(file)")
+        print("\(file)")
         for identifier in map[file]!.sorted() {
-            standardOut.write("  \(identifier)")
+            print("  \(identifier)")
         }
-        standardOut.write("")
+        print("")
     }
 }
 
 if let rootDirectories = getRootDirectories() {
-    standardOut.write("Searching for abandoned resource strings…")
-    let withStoryboard = isOptionalParameterForStoryboardAvailable()
-    let map = findAbandonedIdentifiersIn(rootDirectories, withStoryboard: withStoryboard)
+    print("Searching for abandoned resource strings…")
+    let map = findAbandonedIdentifiersIn(rootDirectories)
     if map.isEmpty {
-        standardOut.write("No abandoned resource strings were detected.")
+        print("No abandoned resource strings were detected.")
     }
     else {
-        standardOut.write("Abandoned resource strings were detected:")
+        print("Abandoned resource strings were detected:")
         displayAbandonedIdentifiersInMap(map)
         
         if isOptionaParameterForWritingAvailable() {
             map.keys.forEach { (stringsFilePath) in
-                standardOut.write("\n\nNow modifying \(stringsFilePath) ...")
+                print("\n\nNow modifying \(stringsFilePath) ...")
                 let updatedStringsFileContent = stringsFile(stringsFilePath, without: map[stringsFilePath]!)
                 do {
                     try updatedStringsFileContent.write(toFile: stringsFilePath, atomically: true, encoding: .utf8)
                 } catch {
-                    standardError.write("ERROR writing file: \(stringsFilePath)")
+                    print("ERROR writing file: \(stringsFilePath)")
                 }
             }
         }
     }
 } else {
-    standardOut.write("Please provide the root directory for source code files as a command line argument.")
+    print("Please provide the root directory for source code files as a command line argument.")
 }
